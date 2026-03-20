@@ -377,29 +377,32 @@ function updateDemon(dt) {
 }
 
 function spawnFireball() {
-  const mouthX = demon.x - demon.width * 0.18;
-  const mouthY = demon.y;
+  const spawnX = demon.x - demon.width * 0.18;
+  const spawnY = demon.y;
 
-  const targetY = player.y + (Math.random() * 80 - 40);
-  const distX = Math.max(120, mouthX - player.x);
-  const vx = -(280 + Math.random() * 70);
-  const vy = ((targetY - mouthY) / distX) * Math.abs(vx);
+  const targetX = player.x;
+  const targetY = player.y + (Math.random() * 60 - 30);
+
+  const dx = targetX - spawnX;
+  const dy = targetY - spawnY;
+  const len = Math.hypot(dx, dy) || 1;
+
+  const speed = 320;
 
   fireballs.push({
-    x: mouthX,
-    y: mouthY,
-    vx,
-    vy,
-    radius: Math.max(10, tileSize * 0.3),
+    x: spawnX,
+    y: spawnY,
+    vx: (dx / len) * speed,
+    vy: (dy / len) * speed,
+    radius: Math.max(14, tileSize * 0.38),
     life: 0,
-    maxLife: 7,
+    maxLife: 8,
     animTimer: 0,
-    frameIndex: Math.floor(Math.random() * FIREBALL_FRAME_COUNT),
-    drawW: tileSize * 1.2,
-    drawH: tileSize * 0.72,
+    frameIndex: 0,
+    drawW: tileSize * 1.8,
+    drawH: tileSize * 1.0,
   });
 }
-
 // ===== RESTART =====
 function restartGame() {
   gameOver = false;
@@ -496,10 +499,7 @@ function updateFireballs(dt) {
       f.frameIndex = (f.frameIndex + 1) % FIREBALL_FRAME_COUNT;
     }
 
-    if (collidesWithMaze(f.x, f.y, f.radius * 0.65)) {
-      fireballs.splice(i, 1);
-      continue;
-    }
+    // NO WALL COLLISION — fireballs pass through everything
 
     if (
       circleRectCollision(
@@ -514,15 +514,16 @@ function updateFireballs(dt) {
     ) {
       gameOver = true;
       updateStatus();
+      fireballs.splice(i, 1);
       continue;
     }
 
     if (
       f.life > f.maxLife ||
-      f.x < -100 ||
-      f.y < -100 ||
-      f.x > window.innerWidth + 100 ||
-      f.y > window.innerHeight + 100
+      f.x < -300 ||
+      f.y < -300 ||
+      f.x > window.innerWidth + 300 ||
+      f.y > window.innerHeight + 300
     ) {
       fireballs.splice(i, 1);
     }
