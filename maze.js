@@ -33,6 +33,19 @@ let demonFrame = 0;
 let demonTimer = 0;
 const DEMON_FRAME_DURATION = 0.12;
 
+// ===== FIREBALL SPRITES =====
+const fireballFrames = [];
+for (let i = 1; i <= 5; i++) {
+  const img = new Image();
+  img.src = `fireball/fb${i}.png`;
+  fireballFrames.push(img);
+}
+
+const FIREBALL_FRAME_COUNT = 5;
+const FIREBALL_FRAME_DURATION = 0.08;
+const FIREBALL_SRC_W = 32;
+const FIREBALL_SRC_H = 18;
+
 // ===== GAME STATE =====
 const statusEl = document.getElementById("status");
 const keys = new Set();
@@ -377,9 +390,13 @@ function spawnFireball() {
     y: mouthY,
     vx,
     vy,
-    radius: tileSize * 0.24,
+    radius: Math.max(10, tileSize * 0.3),
     life: 0,
     maxLife: 7,
+    animTimer: 0,
+    frameIndex: Math.floor(Math.random() * FIREBALL_FRAME_COUNT),
+    drawW: tileSize * 1.2,
+    drawH: tileSize * 0.72,
   });
 }
 
@@ -468,11 +485,18 @@ function updateFireballs(dt) {
 
   for (let i = fireballs.length - 1; i >= 0; i--) {
     const f = fireballs[i];
+
     f.x += f.vx * dt;
     f.y += f.vy * dt;
     f.life += dt;
 
-    if (collidesWithMaze(f.x, f.y, f.radius * 0.7)) {
+    f.animTimer += dt;
+    if (f.animTimer >= FIREBALL_FRAME_DURATION) {
+      f.animTimer = 0;
+      f.frameIndex = (f.frameIndex + 1) % FIREBALL_FRAME_COUNT;
+    }
+
+    if (collidesWithMaze(f.x, f.y, f.radius * 0.65)) {
       fireballs.splice(i, 1);
       continue;
     }
@@ -595,24 +619,35 @@ function drawDemon() {
 }
 
 function drawFireballs() {
+  ctx.imageSmoothingEnabled = false;
+
   for (const f of fireballs) {
-    const glow = f.radius * 2.6;
+    const img = fireballFrames[f.frameIndex];
 
-    const g = ctx.createRadialGradient(f.x, f.y, 1, f.x, f.y, glow);
-    g.addColorStop(0, "rgba(255, 255, 180, 0.95)");
-    g.addColorStop(0.35, "rgba(255, 180, 50, 0.9)");
-    g.addColorStop(0.7, "rgba(255, 80, 0, 0.7)");
-    g.addColorStop(1, "rgba(255, 0, 0, 0)");
+    if (img.complete && img.naturalWidth) {
+      const angle = Math.atan2(f.vy, f.vx);
 
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(f.x, f.y, glow, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = "#ff7a00";
-    ctx.beginPath();
-    ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2);
-    ctx.fill();
+      ctx.save();
+      ctx.translate(f.x, f.y);
+      ctx.rotate(angle);
+      ctx.drawImage(
+        img,
+        0,
+        0,
+        FIREBALL_SRC_W,
+        FIREBALL_SRC_H,
+        -f.drawW / 2,
+        -f.drawH / 2,
+        f.drawW,
+        f.drawH
+      );
+      ctx.restore();
+    } else {
+      ctx.fillStyle = "orange";
+      ctx.beginPath();
+      ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 }
 
