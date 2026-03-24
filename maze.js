@@ -1,6 +1,11 @@
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
+const menu = document.getElementById("menu");
+const buttons = document.querySelectorAll("#menu button");
+
+let gameStarted = false;
+
 // ===== SPRITE SHEET =====
 const spriteSheet = new Image();
 spriteSheet.src = "char/basic_character_spritesheet.png";
@@ -14,6 +19,52 @@ const DIR_ROW = {
   down: 0,
   left: 2,
   right: 3,
+};
+
+
+function showDifficultyMenu() {
+  gameStarted = false;
+  gameOver = false;
+  win = false;
+  fireballs.length = 0;
+
+  if (menu) {
+    menu.style.display = "flex";
+  }
+
+  updateStatus();
+}
+
+buttons.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    currentDifficulty = btn.dataset.diff;
+
+    menu.style.display = "none";
+    gameStarted = true;
+
+    restartGame();
+  });
+});
+
+// ===== DIFFICULTY =====
+let currentDifficulty = "hard";
+
+const DIFFICULTY = {
+  easy: {
+    fireballSpeed: 240,
+    shootInterval: 1.35,
+    volleyCount: 1,
+  },
+  hard: {
+    fireballSpeed: 320,
+    shootInterval: 1.15,
+    volleyCount: 1,
+  },
+  impossible: {
+    fireballSpeed: 320,
+    shootInterval: 1.15,
+    volleyCount: 20,
+  },
 };
 
 let dir = "down";
@@ -106,8 +157,8 @@ addEventListener("keydown", (e) => {
     e.preventDefault();
   }
 
-  if (k === "r" && (gameOver || win)) {
-    restartGame();
+  if (k === "r") {
+    showDifficultyMenu();
   }
 });
 
@@ -215,12 +266,17 @@ function circleRectCollision(cx, cy, radius, rx, ry, rw, rh) {
 function updateStatus() {
   if (!statusEl) return;
 
-  if (win) {
-    statusEl.textContent = "You escaped. Press R to play again.";
+  const label =
+    currentDifficulty.charAt(0).toUpperCase() + currentDifficulty.slice(1);
+
+  if (!gameStarted) {
+    statusEl.textContent = "Choose a difficulty to start.";
+  } else if (win) {
+    statusEl.textContent = `Difficulty: ${label} | You escaped. Press R to choose difficulty again.`;
   } else if (gameOver) {
-    statusEl.textContent = "Burned by fire. Press R to restart.";
+    statusEl.textContent = `Difficulty: ${label} | Burned by fire. Press R to choose difficulty again.`;
   } else {
-    statusEl.textContent = "Reach the green finish. Dodge the fire.";
+    statusEl.textContent = `Difficulty: ${label} | Reach the green finish. Press R to change difficulty.`;
   }
 }
 
@@ -370,13 +426,23 @@ function updateDemon(dt) {
 
   demon.shootTimer += dt;
 
-  if (!gameOver && !win && demon.shootTimer >= demon.shootInterval) {
+  const settings = DIFFICULTY[currentDifficulty];
+
+  if (!gameOver && !win && demon.shootTimer >= settings.shootInterval) {
     demon.shootTimer = 0;
-    spawnFireball();
+
+    if (settings.volleyCount === 1) {
+      spawnFireball();
+    } else {
+      for (let i = 0; i < settings.volleyCount; i++) {
+        const spread = -0.9 + (1.8 * i) / (settings.volleyCount - 1);
+        spawnFireball(spread);
+      }
+    }
   }
 }
 
-function spawnFireball() {
+function spawnFireball(angleOffset = 0) {
   const spawnX = demon.x - demon.width * 0.18;
   const spawnY = demon.y;
 
@@ -385,15 +451,15 @@ function spawnFireball() {
 
   const dx = targetX - spawnX;
   const dy = targetY - spawnY;
-  const len = Math.hypot(dx, dy) || 1;
+  const baseAngle = Math.atan2(dy, dx) + angleOffset;
 
-  const speed = 320;
+  const speed = DIFFICULTY[currentDifficulty].fireballSpeed;
 
   fireballs.push({
     x: spawnX,
     y: spawnY,
-    vx: (dx / len) * speed,
-    vy: (dy / len) * speed,
+    vx: Math.cos(baseAngle) * speed,
+    vy: Math.sin(baseAngle) * speed,
     radius: Math.max(14, tileSize * 0.38),
     life: 0,
     maxLife: 8,
@@ -669,7 +735,7 @@ function drawOverlay() {
   }
 
   ctx.font = "22px Arial";
-  ctx.fillText("Press R to restart", window.innerWidth / 2, 125);
+  ctx.fillText("Press R to choose difficulty", window.innerWidth / 2, 125);
 }
 
 // ===== LOOP =====
@@ -679,11 +745,16 @@ function loop(t) {
   const dt = (t - last) / 1000 || 0;
   last = t;
 
+  ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+
+  if (!gameStarted) {
+    requestAnimationFrame(loop);
+    return;
+  }
+
   updateDemon(dt);
   updatePlayer(dt);
   updateFireballs(dt);
-
-  ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
 
   drawMaze();
   drawDemon();
@@ -697,7 +768,7 @@ function loop(t) {
 // ===== START =====
 function startGame() {
   resizeCanvas();
-  restartGame();
+  showDifficultyMenu();
   requestAnimationFrame(loop);
 }
 
