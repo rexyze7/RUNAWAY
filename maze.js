@@ -1,242 +1,172 @@
-const canvas = document.getElementById("gameCanvas");
-const ctx = canvas.getContext("2d");
+// ===== SETUP =====
+const canvas = document.getElementById("gameCanvas"),
+  ctx = canvas.getContext("2d"),
+  menu = document.getElementById("menu"),
+  buttons = document.querySelectorAll("#menu button"),
+  statusEl = document.getElementById("status"),
+  keys = new Set(),
+  spriteSheet = new Image(),
+  demonImg = new Image(),
+  fireballFrames = [];
 
-const menu = document.getElementById("menu");
-const buttons = document.querySelectorAll("#menu button");
-
-let gameStarted = false;
+let gameStarted = false,
+  currentDifficulty = "hard",
+  dir = "down",
+  frameIndex = 0,
+  frameTimer = 0,
+  demonFrame = 0,
+  demonTimer = 0,
+  maze = [],
+  tileSize = 24,
+  mazeOffsetX = 0,
+  mazeOffsetY = 0,
+  gameOver = false,
+  win = false,
+  last = 0;
 
 // ===== SPRITE SHEET =====
-const spriteSheet = new Image();
 spriteSheet.src = "char/basic_character_spritesheet.png";
 
-const FRAME_WIDTH = 48;
-const FRAME_HEIGHT = 48;
-const FRAMES_PER_ROW = 4;
-
-const DIR_ROW = {
-  up: 1,
-  down: 0,
-  left: 2,
-  right: 3,
-};
-
-
-function showDifficultyMenu() {
-  gameStarted = false;
-  gameOver = false;
-  win = false;
-  fireballs.length = 0;
-
-  if (menu) {
-    menu.style.display = "flex";
-  }
-
-  updateStatus();
-}
-
-buttons.forEach((btn) => {
-  btn.addEventListener("click", () => {
-    currentDifficulty = btn.dataset.diff;
-
-    menu.style.display = "none";
-    gameStarted = true;
-
-    restartGame();
-  });
-});
-
-// ===== DIFFICULTY =====
-let currentDifficulty = "hard";
-
-const DIFFICULTY = {
-  easy: {
-    fireballSpeed: 240,
-    shootInterval: 1.35,
-    volleyCount: 1,
-  },
-  hard: {
-    fireballSpeed: 320,
-    shootInterval: 1.15,
-    volleyCount: 1,
-  },
-  impossible: {
-    fireballSpeed: 320,
-    shootInterval: 1.15,
-    volleyCount: 20,
-  },
-};
-
-let dir = "down";
-let frameIndex = 0;
-let frameTimer = 0;
-const FRAME_DURATION = 0.15;
+const FRAME_WIDTH = 48,
+  FRAME_HEIGHT = 48,
+  FRAMES_PER_ROW = 4,
+  FRAME_DURATION = 0.15,
+  DEMON_FRAME_W = 83,
+  DEMON_FRAME_H = 71,
+  DEMON_FRAMES = 4,
+  DEMON_FRAME_DURATION = 0.12,
+  FIREBALL_FRAME_COUNT = 5,
+  FIREBALL_FRAME_DURATION = 0.08,
+  FIREBALL_SRC_W = 32,
+  FIREBALL_SRC_H = 18,
+  WALL = 1,
+  PATH = 0,
+  MAZE_ROWS = 30,
+  MAZE_COLS = 30,
+  DIR_ROW = { up: 1, down: 0, left: 2, right: 3 },
+  DIFFICULTY = {
+    easy: { fireballSpeed: 240, shootInterval: 1.35, volleyCount: 1 },
+    hard: { fireballSpeed: 320, shootInterval: 1.15, volleyCount: 1 },
+    impossible: { fireballSpeed: 320, shootInterval: 1.15, volleyCount: 20 },
+  };
 
 // ===== DEMON SPRITE =====
-const demonImg = new Image();
 demonImg.src = "char/FLYING.png";
 
-const DEMON_FRAME_W = 83;
-const DEMON_FRAME_H = 71;
-const DEMON_FRAMES = 4;
-
-let demonFrame = 0;
-let demonTimer = 0;
-const DEMON_FRAME_DURATION = 0.12;
-
 // ===== FIREBALL SPRITES =====
-const fireballFrames = [];
 for (let i = 1; i <= 5; i++) {
   const img = new Image();
   img.src = `fireball/fb${i}.png`;
   fireballFrames.push(img);
 }
 
-const FIREBALL_FRAME_COUNT = 5;
-const FIREBALL_FRAME_DURATION = 0.08;
-const FIREBALL_SRC_W = 32;
-const FIREBALL_SRC_H = 18;
-
 // ===== GAME STATE =====
-const statusEl = document.getElementById("status");
-const keys = new Set();
+const player = { x: 0, y: 0, speed: 170, radius: 9, spawnX: 0, spawnY: 0 },
+  finish = { row: 0, col: 0 },
+  demon = {
+    x: 0,
+    y: 0,
+    width: 130,
+    height: 115,
+    moveDir: 1,
+    speed: 160,
+    minY: 0,
+    maxY: 0,
+    shootTimer: 0,
+    shootInterval: 1.15,
+  },
+  fireballs = [];
 
-const WALL = 1;
-const PATH = 0;
-
-const MAZE_ROWS = 30;
-const MAZE_COLS = 30;
-
-let maze = [];
-let tileSize = 24;
-let mazeOffsetX = 0;
-let mazeOffsetY = 0;
-
-let gameOver = false;
-let win = false;
-
-// ===== PLAYER =====
-const player = {
-  x: 0,
-  y: 0,
-  speed: 170,
-  radius: 9,
-  spawnX: 0,
-  spawnY: 0,
+// ===== HELPERS =====
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+const shuffle = a => {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+};
+const createGrid = (r, c, fill = WALL) =>
+  Array.from({ length: r }, () => Array(c).fill(fill));
+const cellCenter = (row, col) => ({
+  x: mazeOffsetX + col * tileSize + tileSize / 2,
+  y: mazeOffsetY + row * tileSize + tileSize / 2,
+});
+const worldToCell = (x, y) => ({
+  col: Math.floor((x - mazeOffsetX) / tileSize),
+  row: Math.floor((y - mazeOffsetY) / tileSize),
+});
+const inBounds = (row, col) =>
+  row >= 0 && row < MAZE_ROWS && col >= 0 && col < MAZE_COLS;
+const isWallAt = (x, y) => {
+  const { row, col } = worldToCell(x, y);
+  return !inBounds(row, col) || maze[row][col] === WALL;
+};
+const spriteDrawSize = () => {
+  const dh = tileSize * 1.7,
+    scale = dh / FRAME_HEIGHT;
+  return { dw: FRAME_WIDTH * scale, dh };
 };
 
-// ===== FINISH =====
-const finish = {
-  row: 0,
-  col: 0,
-};
+function showDifficultyMenu() {
+  gameStarted = gameOver = win = false;
+  fireballs.length = 0;
+  if (menu) menu.style.display = "flex";
+  updateStatus();
+}
 
-// ===== DEMON =====
-const demon = {
-  x: 0,
-  y: 0,
-  width: 130,
-  height: 115,
-  moveDir: 1,
-  speed: 160,
-  minY: 0,
-  maxY: 0,
-  shootTimer: 0,
-  shootInterval: 1.15,
-};
-
-// ===== FIREBALLS =====
-const fireballs = [];
+buttons.forEach(btn =>
+  btn.addEventListener("click", () => {
+    currentDifficulty = btn.dataset.diff;
+    menu.style.display = "none";
+    gameStarted = true;
+    restartGame();
+  })
+);
 
 // ===== INPUT =====
-addEventListener("keydown", (e) => {
+addEventListener("keydown", e => {
   const k = e.key.toLowerCase();
-
   if ("wasd".includes(k)) {
     keys.add(k);
     e.preventDefault();
   }
-
-  if (k === "r") {
-    showDifficultyMenu();
-  }
+  if (k === "r") showDifficultyMenu();
 });
 
-addEventListener("keyup", (e) => {
-  keys.delete(e.key.toLowerCase());
-});
+addEventListener("keyup", e => keys.delete(e.key.toLowerCase()));
 
 // ===== CANVAS SIZE =====
+addEventListener("resize", resizeCanvas);
+
 function resizeCanvas() {
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = Math.round(window.innerWidth * dpr);
-  canvas.height = Math.round(window.innerHeight * dpr);
-  canvas.style.width = `${window.innerWidth}px`;
-  canvas.style.height = `${window.innerHeight}px`;
+  const dpr = window.devicePixelRatio || 1,
+    viewW = window.innerWidth,
+    viewH = window.innerHeight,
+    topPadding = 110,
+    bottomPadding = 70,
+    sidePadding = 140,
+    usableW = Math.max(400, viewW - sidePadding * 2),
+    usableH = Math.max(400, viewH - topPadding - bottomPadding),
+    mazePixelW = (tileSize = Math.max(
+      16,
+      Math.floor(Math.min(usableW / MAZE_COLS, usableH / MAZE_ROWS))
+    )) * MAZE_COLS,
+    mazePixelH = tileSize * MAZE_ROWS;
+
+  canvas.width = Math.round(viewW * dpr);
+  canvas.height = Math.round(viewH * dpr);
+  canvas.style.width = `${viewW}px`;
+  canvas.style.height = `${viewH}px`;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-  const viewW = window.innerWidth;
-  const viewH = window.innerHeight;
-
-  const topPadding = 110;
-  const bottomPadding = 70;
-  const sidePadding = 140;
-
-  const usableW = Math.max(400, viewW - sidePadding * 2);
-  const usableH = Math.max(400, viewH - topPadding - bottomPadding);
-
-  tileSize = Math.floor(Math.min(usableW / MAZE_COLS, usableH / MAZE_ROWS));
-  tileSize = Math.max(16, tileSize);
-
-  const mazePixelW = tileSize * MAZE_COLS;
-  const mazePixelH = tileSize * MAZE_ROWS;
 
   mazeOffsetX = Math.floor((viewW - mazePixelW) / 2);
   mazeOffsetY = Math.floor((viewH - mazePixelH) / 2) + 20;
-
   updateDemonPosition();
-}
-addEventListener("resize", resizeCanvas);
-
-// ===== HELPERS =====
-function shuffle(array) {
-  for (let i = array.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [array[i], array[j]] = [array[j], array[i]];
-  }
-  return array;
-}
-
-function createGrid(rows, cols, fill = WALL) {
-  return Array.from({ length: rows }, () => Array(cols).fill(fill));
-}
-
-function cellCenter(row, col) {
-  return {
-    x: mazeOffsetX + col * tileSize + tileSize / 2,
-    y: mazeOffsetY + row * tileSize + tileSize / 2,
-  };
-}
-
-function worldToCell(x, y) {
-  return {
-    col: Math.floor((x - mazeOffsetX) / tileSize),
-    row: Math.floor((y - mazeOffsetY) / tileSize),
-  };
-}
-
-function inBounds(row, col) {
-  return row >= 0 && row < MAZE_ROWS && col >= 0 && col < MAZE_COLS;
-}
-
-function isWallAt(x, y) {
-  const { row, col } = worldToCell(x, y);
-  if (!inBounds(row, col)) return true;
-  return maze[row][col] === WALL;
 }
 
 function collidesWithMaze(x, y, radius) {
-  const points = [
+  return [
     [x, y],
     [x - radius, y],
     [x + radius, y],
@@ -246,62 +176,44 @@ function collidesWithMaze(x, y, radius) {
     [x + radius * 0.7, y - radius * 0.7],
     [x - radius * 0.7, y + radius * 0.7],
     [x + radius * 0.7, y + radius * 0.7],
-  ];
-
-  for (const [px, py] of points) {
-    if (isWallAt(px, py)) return true;
-  }
-
-  return false;
+  ].some(([px, py]) => isWallAt(px, py));
 }
 
 function circleRectCollision(cx, cy, radius, rx, ry, rw, rh) {
-  const nearestX = Math.max(rx, Math.min(cx, rx + rw));
-  const nearestY = Math.max(ry, Math.min(cy, ry + rh));
-  const dx = cx - nearestX;
-  const dy = cy - nearestY;
+  const nx = Math.max(rx, Math.min(cx, rx + rw)),
+    ny = Math.max(ry, Math.min(cy, ry + rh)),
+    dx = cx - nx,
+    dy = cy - ny;
   return dx * dx + dy * dy <= radius * radius;
 }
 
 function updateStatus() {
   if (!statusEl) return;
-
-  const label =
-    currentDifficulty.charAt(0).toUpperCase() + currentDifficulty.slice(1);
-
-  if (!gameStarted) {
-    statusEl.textContent = "Choose a difficulty to start.";
-  } else if (win) {
-    statusEl.textContent = `Difficulty: ${label} | You escaped. Press R to choose difficulty again.`;
-  } else if (gameOver) {
-    statusEl.textContent = `Difficulty: ${label} | Burned by fire. Press R to choose difficulty again.`;
-  } else {
-    statusEl.textContent = `Difficulty: ${label} | Reach the green finish. Press R to change difficulty.`;
-  }
+  const label = cap(currentDifficulty);
+  statusEl.textContent = !gameStarted
+    ? "Choose a difficulty to start."
+    : win
+    ? `Difficulty: ${label} | You escaped. Press R to choose difficulty again.`
+    : gameOver
+    ? `Difficulty: ${label} | Burned by fire. Press R to choose difficulty again.`
+    : `Difficulty: ${label} | Reach the green finish. Press R to change difficulty.`;
 }
 
 // ===== MAZE GENERATION =====
 function generateMaze(rows = MAZE_ROWS, cols = MAZE_COLS) {
-  const grid = createGrid(rows, cols, WALL);
-
-  function inside(r, c) {
-    return r > 0 && r < rows - 1 && c > 0 && c < cols - 1;
-  }
+  const grid = createGrid(rows, cols, WALL),
+    inside = (r, c) => r > 0 && r < rows - 1 && c > 0 && c < cols - 1;
 
   function carve(r, c) {
     grid[r][c] = PATH;
-
-    const dirs = shuffle([
+    for (const [dr, dc] of shuffle([
       [-2, 0],
       [2, 0],
       [0, -2],
       [0, 2],
-    ]);
-
-    for (const [dr, dc] of dirs) {
-      const nr = r + dr;
-      const nc = c + dc;
-
+    ])) {
+      const nr = r + dr,
+        nc = c + dc;
       if (inside(nr, nc) && grid[nr][nc] === WALL) {
         grid[r + dr / 2][c + dc / 2] = PATH;
         carve(nr, nc);
@@ -309,53 +221,40 @@ function generateMaze(rows = MAZE_ROWS, cols = MAZE_COLS) {
     }
   }
 
-  let startRow = Math.floor(Math.random() * Math.floor(rows / 2)) * 2 + 1;
-  let endRow = Math.floor(Math.random() * Math.floor(rows / 2)) * 2 + 1;
+  let startRow = Math.floor(Math.random() * Math.floor(rows / 2)) * 2 + 1,
+    endRow = Math.floor(Math.random() * Math.floor(rows / 2)) * 2 + 1;
 
   if (startRow >= rows) startRow = rows - 2;
   if (endRow >= rows) endRow = rows - 2;
 
   carve(startRow, 1);
-
-  grid[startRow][0] = PATH;
-  grid[startRow][1] = PATH;
-  grid[endRow][cols - 1] = PATH;
-  grid[endRow][cols - 2] = PATH;
-
-  const extraOpenChance = 0.24;
+  grid[startRow][0] = grid[startRow][1] = PATH;
+  grid[endRow][cols - 1] = grid[endRow][cols - 2] = PATH;
 
   for (let r = 1; r < rows - 1; r++) {
     for (let c = 1; c < cols - 1; c++) {
-      if (grid[r][c] === WALL && Math.random() < extraOpenChance) {
+      if (grid[r][c] === WALL && Math.random() < 0.24) {
         const openNeighbors =
-          (grid[r - 1][c] === PATH ? 1 : 0) +
-          (grid[r + 1][c] === PATH ? 1 : 0) +
-          (grid[r][c - 1] === PATH ? 1 : 0) +
-          (grid[r][c + 1] === PATH ? 1 : 0);
-
-        if (openNeighbors >= 2) {
-          grid[r][c] = PATH;
-        }
+          (grid[r - 1][c] === PATH) +
+          (grid[r + 1][c] === PATH) +
+          (grid[r][c - 1] === PATH) +
+          (grid[r][c + 1] === PATH);
+        if (openNeighbors >= 2) grid[r][c] = PATH;
       }
     }
   }
 
-  const widenChance = 0.16;
-
   for (let r = 1; r < rows - 1; r++) {
     for (let c = 1; c < cols - 1; c++) {
-      if (grid[r][c] === PATH && Math.random() < widenChance) {
-        const dirs = shuffle([
+      if (grid[r][c] === PATH && Math.random() < 0.16) {
+        for (const [dr, dc] of shuffle([
           [-1, 0],
           [1, 0],
           [0, -1],
           [0, 1],
-        ]);
-
-        for (const [dr, dc] of dirs) {
-          const nr = r + dr;
-          const nc = c + dc;
-
+        ])) {
+          const nr = r + dr,
+            nc = c + dc;
           if (inside(nr, nc)) {
             grid[nr][nc] = PATH;
             break;
@@ -373,25 +272,9 @@ function generateMaze(rows = MAZE_ROWS, cols = MAZE_COLS) {
 }
 
 // ===== PLAYER ANIMATION =====
-function spriteDrawSize() {
-  const dh = tileSize * 1.7;
-  const scale = dh / FRAME_HEIGHT;
-
-  return {
-    dw: FRAME_WIDTH * scale,
-    dh,
-  };
-}
-
 function updatePlayerAnimation(dt, moving) {
-  if (!moving) {
-    frameIndex = 0;
-    frameTimer = 0;
-    return;
-  }
-
-  frameTimer += dt;
-  if (frameTimer >= FRAME_DURATION) {
+  if (!moving) return (frameIndex = frameTimer = 0);
+  if ((frameTimer += dt) >= FRAME_DURATION) {
     frameTimer = 0;
     frameIndex = (frameIndex + 1) % FRAMES_PER_ROW;
   }
@@ -406,86 +289,63 @@ function updateDemonPosition() {
 }
 
 function updateDemon(dt) {
-  demonTimer += dt;
-  if (demonTimer >= DEMON_FRAME_DURATION) {
+  if ((demonTimer += dt) >= DEMON_FRAME_DURATION) {
     demonTimer = 0;
     demonFrame = (demonFrame + 1) % DEMON_FRAMES;
   }
 
   demon.y += demon.moveDir * demon.speed * dt;
-
-  if (demon.y <= demon.minY) {
-    demon.y = demon.minY;
-    demon.moveDir = 1;
-  }
-
-  if (demon.y >= demon.maxY) {
-    demon.y = demon.maxY;
-    demon.moveDir = -1;
-  }
-
-  demon.shootTimer += dt;
+  if (demon.y <= demon.minY) demon.y = demon.minY, demon.moveDir = 1;
+  if (demon.y >= demon.maxY) demon.y = demon.maxY, demon.moveDir = -1;
 
   const settings = DIFFICULTY[currentDifficulty];
+  demon.shootTimer += dt;
 
   if (!gameOver && !win && demon.shootTimer >= settings.shootInterval) {
     demon.shootTimer = 0;
-
-    if (settings.volleyCount === 1) {
-      spawnFireball();
-    } else {
-      for (let i = 0; i < settings.volleyCount; i++) {
-        const spread = -0.9 + (1.8 * i) / (settings.volleyCount - 1);
-        spawnFireball(spread);
-      }
+    if (settings.volleyCount === 1) return spawnFireball();
+    for (let i = 0; i < settings.volleyCount; i++) {
+      spawnFireball(-0.9 + (1.8 * i) / (settings.volleyCount - 1));
     }
   }
 }
 
 function spawnFireball(angleOffset = 0) {
-  const spawnX = demon.x - demon.width * 0.18;
-  const spawnY = demon.y;
-
-  const targetX = player.x;
-  const targetY = player.y + (Math.random() * 60 - 30);
-
-  const dx = targetX - spawnX;
-  const dy = targetY - spawnY;
-  const baseAngle = Math.atan2(dy, dx) + angleOffset;
-
-  const speed = DIFFICULTY[currentDifficulty].fireballSpeed;
+  const spawnX = demon.x - demon.width * 0.18,
+    spawnY = demon.y,
+    dx = player.x - spawnX,
+    dy = player.y + (Math.random() * 60 - 30) - spawnY,
+    angle = Math.atan2(dy, dx) + angleOffset,
+    speed = DIFFICULTY[currentDifficulty].fireballSpeed;
 
   fireballs.push({
     x: spawnX,
     y: spawnY,
-    vx: Math.cos(baseAngle) * speed,
-    vy: Math.sin(baseAngle) * speed,
+    vx: Math.cos(angle) * speed,
+    vy: Math.sin(angle) * speed,
     radius: Math.max(14, tileSize * 0.38),
     life: 0,
     maxLife: 8,
     animTimer: 0,
     frameIndex: 0,
     drawW: tileSize * 1.8,
-    drawH: tileSize * 1.0,
+    drawH: tileSize * 1,
   });
 }
+
 // ===== RESTART =====
 function restartGame() {
-  gameOver = false;
-  win = false;
+  gameOver = win = false;
   fireballs.length = 0;
 
-  const data = generateMaze();
-  maze = data.grid;
+  const data = generateMaze(),
+    spawn = cellCenter(data.start.row, data.start.col);
 
+  maze = data.grid;
   finish.row = data.end.row;
   finish.col = data.end.col;
-
-  const spawn = cellCenter(data.start.row, data.start.col);
-  player.x = spawn.x;
-  player.y = spawn.y;
-  player.spawnX = spawn.x;
-  player.spawnY = spawn.y;
+  player.x = player.spawnX = spawn.x;
+  player.y = player.spawnY = spawn.y;
 
   demon.moveDir = Math.random() < 0.5 ? 1 : -1;
   demon.shootTimer = 0;
@@ -497,53 +357,30 @@ function restartGame() {
 function updatePlayer(dt) {
   if (gameOver || win) return;
 
-  let dx = 0;
-  let dy = 0;
+  let dx = 0,
+    dy = 0;
+  if (keys.has("a")) dx--, (dir = "left");
+  if (keys.has("d")) dx++, (dir = "right");
+  if (keys.has("w")) dy--, (dir = "up");
+  if (keys.has("s")) dy++, (dir = "down");
 
-  if (keys.has("a")) {
-    dx -= 1;
-    dir = "left";
-  }
-  if (keys.has("d")) {
-    dx += 1;
-    dir = "right";
-  }
-  if (keys.has("w")) {
-    dy -= 1;
-    dir = "up";
-  }
-  if (keys.has("s")) {
-    dy += 1;
-    dir = "down";
-  }
-
-  if (dx !== 0 && dy !== 0) {
+  if (dx && dy) {
     const len = Math.hypot(dx, dy);
     dx /= len;
     dy /= len;
   }
 
-  const moving = dx !== 0 || dy !== 0;
-  updatePlayerAnimation(dt, moving);
+  updatePlayerAnimation(dt, dx || dy);
 
-  const step = player.speed * dt;
+  const step = player.speed * dt,
+    nextX = player.x + dx * step,
+    nextY = player.y + dy * step;
 
-  const nextX = player.x + dx * step;
-  const nextY = player.y + dy * step;
+  if (!collidesWithMaze(nextX, player.y, player.radius)) player.x = nextX;
+  if (!collidesWithMaze(player.x, nextY, player.radius)) player.y = nextY;
 
-  if (!collidesWithMaze(nextX, player.y, player.radius)) {
-    player.x = nextX;
-  }
-
-  if (!collidesWithMaze(player.x, nextY, player.radius)) {
-    player.y = nextY;
-  }
-
-  const finishCenter = cellCenter(finish.row, finish.col);
-  if (
-    Math.hypot(player.x - finishCenter.x, player.y - finishCenter.y) <
-    tileSize * 0.35
-  ) {
+  const c = cellCenter(finish.row, finish.col);
+  if (Math.hypot(player.x - c.x, player.y - c.y) < tileSize * 0.35) {
     win = true;
     updateStatus();
   }
@@ -554,13 +391,11 @@ function updateFireballs(dt) {
 
   for (let i = fireballs.length - 1; i >= 0; i--) {
     const f = fireballs[i];
-
     f.x += f.vx * dt;
     f.y += f.vy * dt;
     f.life += dt;
 
-    f.animTimer += dt;
-    if (f.animTimer >= FIREBALL_FRAME_DURATION) {
+    if ((f.animTimer += dt) >= FIREBALL_FRAME_DURATION) {
       f.animTimer = 0;
       f.frameIndex = (f.frameIndex + 1) % FIREBALL_FRAME_COUNT;
     }
@@ -588,8 +423,8 @@ function updateFireballs(dt) {
       f.life > f.maxLife ||
       f.x < -300 ||
       f.y < -300 ||
-      f.x > window.innerWidth + 300 ||
-      f.y > window.innerHeight + 300
+      f.x > innerWidth + 300 ||
+      f.y > innerHeight + 300
     ) {
       fireballs.splice(i, 1);
     }
@@ -598,21 +433,20 @@ function updateFireballs(dt) {
 
 // ===== DRAW =====
 function drawMaze() {
-  const mazeW = tileSize * MAZE_COLS;
-  const mazeH = tileSize * MAZE_ROWS;
+  const mazeW = tileSize * MAZE_COLS,
+    mazeH = tileSize * MAZE_ROWS;
 
   ctx.fillStyle = "#111";
   ctx.fillRect(mazeOffsetX - 8, mazeOffsetY - 8, mazeW + 16, mazeH + 16);
 
   for (let row = 0; row < MAZE_ROWS; row++) {
     for (let col = 0; col < MAZE_COLS; col++) {
-      const x = mazeOffsetX + col * tileSize;
-      const y = mazeOffsetY + row * tileSize;
+      const x = mazeOffsetX + col * tileSize,
+        y = mazeOffsetY + row * tileSize;
 
       if (maze[row][col] === WALL) {
         ctx.fillStyle = "#efefef";
         ctx.fillRect(x, y, tileSize, tileSize);
-
         ctx.strokeStyle = "#d0d0d0";
         ctx.strokeRect(x + 0.5, y + 0.5, tileSize - 1, tileSize - 1);
       } else {
@@ -622,33 +456,29 @@ function drawMaze() {
     }
   }
 
-  const fx = mazeOffsetX + finish.col * tileSize;
-  const fy = mazeOffsetY + finish.row * tileSize;
+  const fx = mazeOffsetX + finish.col * tileSize,
+    fy = mazeOffsetY + finish.row * tileSize;
   ctx.fillStyle = "#2ecc71";
   ctx.fillRect(fx + 4, fy + 4, tileSize - 8, tileSize - 8);
 }
 
 function drawPlayer() {
-  const { dw, dh } = spriteDrawSize();
-  const x = player.x - dw / 2;
-  const y = player.y - dh / 2;
+  const { dw, dh } = spriteDrawSize(),
+    x = player.x - dw / 2,
+    y = player.y - dh / 2;
 
   if (!spriteSheet.complete || !spriteSheet.naturalWidth) {
     ctx.fillStyle = "red";
     ctx.beginPath();
     ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
-    ctx.fill();
-    return;
+    return ctx.fill();
   }
-
-  const sx = frameIndex * FRAME_WIDTH;
-  const sy = DIR_ROW[dir] * FRAME_HEIGHT;
 
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(
     spriteSheet,
-    sx,
-    sy,
+    frameIndex * FRAME_WIDTH,
+    DIR_ROW[dir] * FRAME_HEIGHT,
     FRAME_WIDTH,
     FRAME_HEIGHT,
     x,
@@ -659,27 +489,23 @@ function drawPlayer() {
 }
 
 function drawDemon() {
-  const drawX = demon.x - demon.width / 2;
-  const drawY = demon.y - demon.height / 2;
+  const x = demon.x - demon.width / 2,
+    y = demon.y - demon.height / 2;
 
   if (!demonImg.complete || !demonImg.naturalWidth) {
     ctx.fillStyle = "purple";
-    ctx.fillRect(drawX, drawY, demon.width, demon.height);
-    return;
+    return ctx.fillRect(x, y, demon.width, demon.height);
   }
-
-  const sx = demonFrame * DEMON_FRAME_W;
-  const sy = 0;
 
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(
     demonImg,
-    sx,
-    sy,
+    demonFrame * DEMON_FRAME_W,
+    0,
     DEMON_FRAME_W,
     DEMON_FRAME_H,
-    drawX,
-    drawY,
+    x,
+    y,
     demon.width,
     demon.height
   );
@@ -690,13 +516,10 @@ function drawFireballs() {
 
   for (const f of fireballs) {
     const img = fireballFrames[f.frameIndex];
-
     if (img.complete && img.naturalWidth) {
-      const angle = Math.atan2(f.vy, f.vx);
-
       ctx.save();
       ctx.translate(f.x, f.y);
-      ctx.rotate(angle);
+      ctx.rotate(Math.atan2(f.vy, f.vx));
       ctx.drawImage(
         img,
         0,
@@ -722,35 +545,22 @@ function drawOverlay() {
   if (!gameOver && !win) return;
 
   ctx.fillStyle = "rgba(0,0,0,0.35)";
-  ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
-
+  ctx.fillRect(0, 0, innerWidth, innerHeight);
   ctx.fillStyle = "white";
   ctx.font = "bold 42px Arial";
   ctx.textAlign = "center";
-
-  if (win) {
-    ctx.fillText("YOU ESCAPED", window.innerWidth / 2, 90);
-  } else {
-    ctx.fillText("YOU DIED", window.innerWidth / 2, 90);
-  }
-
+  ctx.fillText(win ? "YOU ESCAPED" : "YOU DIED", innerWidth / 2, 90);
   ctx.font = "22px Arial";
-  ctx.fillText("Press R to choose difficulty", window.innerWidth / 2, 125);
+  ctx.fillText("Press R to choose difficulty", innerWidth / 2, 125);
 }
 
 // ===== LOOP =====
-let last = 0;
-
 function loop(t) {
   const dt = (t - last) / 1000 || 0;
   last = t;
 
-  ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
-
-  if (!gameStarted) {
-    requestAnimationFrame(loop);
-    return;
-  }
+  ctx.clearRect(0, 0, innerWidth, innerHeight);
+  if (!gameStarted) return requestAnimationFrame(loop);
 
   updateDemon(dt);
   updatePlayer(dt);
